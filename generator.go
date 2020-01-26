@@ -145,7 +145,8 @@ func (g *Generator) processSchema(schemaName string, schema *Schema) (typ string
 func (g *Generator) processArray(name string, schema *Schema) (typeStr string, err error) {
 	if schema.Items != nil {
 		// subType: fallback name in case this array contains inline object without a title
-		subName := g.getSchemaName(name+"Items", schema.Items)
+		subName := g.getSchemaName("", schema.Items)
+
 		subTyp, err := g.processSchema(subName, schema.Items)
 		if err != nil {
 			return "", err
@@ -258,6 +259,32 @@ func (g *Generator) processObject(name string, schema *Schema) (typ string, err 
 			strct.AdditionalType = "false"
 		}
 	}
+	// add support for allOf
+	if schema.AllOf != nil {
+		for _, allOfSchema := range schema.AllOf {
+			for propKey, prop := range allOfSchema.Properties {
+				fieldName := getGolangName(propKey)
+				// calculate sub-schema name here, may not actually be used depending on type of schema!
+				subSchemaName := g.getSchemaName(fieldName, prop)
+				fieldType, err := g.processSchema(subSchemaName, prop)
+				if err != nil {
+					return "", err
+				}
+				f := Field{
+					Name:        fieldName,
+					JSONName:    propKey,
+					Type:        fieldType,
+					Required:    contains(schema.Required, propKey),
+					Description: prop.Description,
+				}
+				if f.Required {
+					strct.GenerateCode = true
+				}
+				strct.Fields[f.Name] = f
+			}
+
+		}
+	}
 	g.Structs[strct.Name] = strct
 	// objects are always a pointer
 	return getPrimitiveTypeName("object", name, true)
@@ -305,20 +332,20 @@ func getPrimitiveTypeName(schemaType string, subType string, pointer bool) (name
 
 // return a name for this (sub-)schema.
 func (g *Generator) getSchemaName(keyName string, schema *Schema) string {
-	if len(schema.Title) > 0 {
-		return getGolangName(schema.Title)
-	}
-	if keyName != "" {
-		return getGolangName(keyName)
-	}
+	//	if len(schema.Title) > 0 {
+	//		return getGolangName(schema.Title)
+	//	}
 	if schema.Parent == nil {
-		return "Root"
+		return "FireBom"
 	}
 	if schema.JSONKey != "" {
 		return getGolangName(schema.JSONKey)
 	}
+	if keyName != "" {
+		return getGolangName(keyName)
+	}
 	if schema.Parent != nil && schema.Parent.JSONKey != "" {
-		return getGolangName(schema.Parent.JSONKey + "Item")
+		return getGolangName(schema.Parent.JSONKey)
 	}
 	g.anonCount++
 	return fmt.Sprintf("Anonymous%d", g.anonCount)
