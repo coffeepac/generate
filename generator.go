@@ -145,7 +145,7 @@ func (g *Generator) processSchema(schemaName string, schema *Schema) (typ string
 func (g *Generator) processArray(name string, schema *Schema) (typeStr string, err error) {
 	if schema.Items != nil {
 		// subType: fallback name in case this array contains inline object without a title
-		subName := g.getSchemaName("", schema.Items)
+		subName := g.getSchemaName(strings.TrimRight(name, "s"), schema.Items)
 
 		subTyp, err := g.processSchema(subName, schema.Items)
 		if err != nil {
@@ -155,6 +155,15 @@ func (g *Generator) processArray(name string, schema *Schema) (typeStr string, e
 		if err != nil {
 			return "", err
 		}
+
+		// process allOf for arrays
+		for _, allOfSchema := range schema.AllOf {
+			_, err = g.processSchema(subName, allOfSchema)
+			if err != nil {
+				return "", err
+			}
+		}
+
 		// only alias root arrays
 		if schema.Parent == nil {
 			array := Field{
@@ -175,35 +184,56 @@ func (g *Generator) processArray(name string, schema *Schema) (typeStr string, e
 // schema: detail incl properties & child objects
 // returns: generated type
 func (g *Generator) processObject(name string, schema *Schema) (typ string, err error) {
-	strct := Struct{
-		ID:          schema.ID(),
-		Name:        name,
-		Description: schema.Description,
-		Fields:      make(map[string]Field, len(schema.Properties)),
+	var strct Struct
+	var ok bool
+	if strct, ok = g.Structs[name]; !ok {
+		strct = Struct{
+			ID:          schema.ID(),
+			Name:        name,
+			Description: schema.Description,
+			Fields:      make(map[string]Field, len(schema.Properties)),
+		}
 	}
+
 	// cache the object name in case any sub-schemas recursively reference it
 	schema.GeneratedType = "*" + name
+
 	// regular properties
-	for propKey, prop := range schema.Properties {
-		fieldName := getGolangName(propKey)
-		// calculate sub-schema name here, may not actually be used depending on type of schema!
-		subSchemaName := g.getSchemaName(fieldName, prop)
-		fieldType, err := g.processSchema(subSchemaName, prop)
-		if err != nil {
-			return "", err
-		}
-		f := Field{
-			Name:        fieldName,
-			JSONName:    propKey,
-			Type:        fieldType,
-			Required:    contains(schema.Required, propKey),
-			Description: prop.Description,
-		}
-		if f.Required {
-			strct.GenerateCode = true
-		}
-		strct.Fields[f.Name] = f
+	strct, err = g.parseRegularProperties(strct, schema)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse standard proprites with error %w", err)
 	}
+
+	// allOf properties
+	if schema.AllOf != nil {
+		for _, allOfSchema := range schema.AllOf {
+			strct, err = g.parseRegularProperties(strct, allOfSchema)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse standard proprites from allOf schema %s with error %w", allOfSchema.Title, err)
+			}
+		}
+	}
+
+	// oneOf properties
+	if schema.OneOf != nil {
+		for _, oneOfSchema := range schema.OneOf {
+			strct, err = g.parseRegularProperties(strct, oneOfSchema)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse standard proprites from allOf schema %s with error %w", oneOfSchema.Title, err)
+			}
+		}
+	}
+
+	// anyOf properties
+	if schema.AnyOf != nil {
+		for _, anyOfSchema := range schema.AnyOf {
+			strct, err = g.parseRegularProperties(strct, anyOfSchema)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse standard proprites from allOf schema %s with error %w", anyOfSchema.Title, err)
+			}
+		}
+	}
+
 	// additionalProperties with typed sub-schema
 	if schema.AdditionalProperties != nil && schema.AdditionalProperties.AdditionalPropertiesBool == nil {
 		ap := (*Schema)(schema.AdditionalProperties)
@@ -259,35 +289,34 @@ func (g *Generator) processObject(name string, schema *Schema) (typ string, err 
 			strct.AdditionalType = "false"
 		}
 	}
-	// add support for allOf
-	if schema.AllOf != nil {
-		for _, allOfSchema := range schema.AllOf {
-			for propKey, prop := range allOfSchema.Properties {
-				fieldName := getGolangName(propKey)
-				// calculate sub-schema name here, may not actually be used depending on type of schema!
-				subSchemaName := g.getSchemaName(fieldName, prop)
-				fieldType, err := g.processSchema(subSchemaName, prop)
-				if err != nil {
-					return "", err
-				}
-				f := Field{
-					Name:        fieldName,
-					JSONName:    propKey,
-					Type:        fieldType,
-					Required:    contains(schema.Required, propKey),
-					Description: prop.Description,
-				}
-				if f.Required {
-					strct.GenerateCode = true
-				}
-				strct.Fields[f.Name] = f
-			}
-
-		}
-	}
-	g.Structs[strct.Name] = strct
+	g.Structs[name] = strct
 	// objects are always a pointer
 	return getPrimitiveTypeName("object", name, true)
+}
+
+func (g *Generator) parseRegularProperties(strct Struct, schema *Schema) (Struct, error) {
+	for propKey, prop := range schema.Properties {
+		fieldName := getGolangName(propKey)
+		// calculate sub-schema name here, may not actually be used depending on type of schema!
+		subSchemaName := g.getSchemaName(fieldName, prop)
+		fieldType, err := g.processSchema(subSchemaName, prop)
+		if err != nil {
+			return strct, err
+		}
+		f := Field{
+			Name:        fieldName,
+			JSONName:    propKey,
+			Type:        fieldType,
+			Required:    contains(schema.Required, propKey),
+			Description: prop.Description,
+		}
+		if f.Required {
+			strct.GenerateCode = true
+		}
+		strct.Fields[f.Name] = f
+	}
+
+	return strct, nil
 }
 
 func contains(s []string, e string) bool {

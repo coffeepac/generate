@@ -268,6 +268,22 @@ func (schema *Schema) updateParentLinks() {
 		schema.Items.Parent = schema
 		schema.Items.updateParentLinks()
 	}
+
+	// AllOf, OneOf, AnyOf processing
+	for _, allOfSchema := range schema.AllOf {
+		allOfSchema.Parent = schema
+		allOfSchema.updateParentLinks()
+	}
+
+	for _, anyOfSchema := range schema.AnyOf {
+		anyOfSchema.Parent = schema
+		anyOfSchema.updateParentLinks()
+	}
+
+	for _, oneOfSchema := range schema.OneOf {
+		oneOfSchema.Parent = schema
+		oneOfSchema.updateParentLinks()
+	}
 }
 
 func (schema *Schema) ensureSchemaKeyword() error {
