@@ -242,6 +242,11 @@ func (schema *Schema) updatePathElements() {
 		(*Schema)(schema.AdditionalProperties).updatePathElements()
 	}
 
+	if schema.Items == nil && (schema.AllOf != nil || schema.AnyOf != nil || schema.OneOf != nil) {
+		schema.Items = &Schema{
+			TypeValue: "object",
+		}
+	}
 	if schema.Items != nil {
 		schema.Items.PathElement = "items"
 		schema.Items.updatePathElements()
@@ -263,6 +268,11 @@ func (schema *Schema) updateParentLinks() {
 	if schema.AdditionalProperties != nil {
 		schema.AdditionalProperties.Parent = schema
 		(*Schema)(schema.AdditionalProperties).updateParentLinks()
+	}
+	if schema.Items == nil && (schema.AllOf != nil || schema.AnyOf != nil || schema.OneOf != nil) {
+		schema.Items = &Schema{
+			TypeValue: "object",
+		}
 	}
 	if schema.Items != nil {
 		schema.Items.Parent = schema

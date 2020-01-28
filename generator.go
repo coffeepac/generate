@@ -144,9 +144,19 @@ func (g *Generator) processSchema(schemaName string, schema *Schema) (typ string
 // schema: items element
 func (g *Generator) processArray(name string, schema *Schema) (typeStr string, err error) {
 	if schema.Items != nil {
-		// subType: fallback name in case this array contains inline object without a title
-		subName := g.getSchemaName(strings.TrimRight(name, "s"), schema.Items)
+		// for slice types, use a singluar name for the type, not plural
+		// most of the below nonsense is to handle policies -> policy
+		singularName := name
+		if name[len(name)-1:] == "s" {
+			if name[len(name)-3:] == "ies" {
+				singularName = strings.Replace(name, "ies", "y", 1)
+			} else {
+				singularName = strings.TrimRight(name, "s")
+			}
+		}
+		subName := g.getSchemaName(singularName, schema.Items)
 
+		// subType: fallback name in case this array contains inline object without a title
 		subTyp, err := g.processSchema(subName, schema.Items)
 		if err != nil {
 			return "", err
